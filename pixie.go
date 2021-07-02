@@ -148,7 +148,7 @@ func (g *game) Update(screen *ebiten.Image) (err error) {
 	for i := 0; i < fairyDustOnScreen; i++ {
 		fd := g.fairyDust[i]
 		if fd.active && intersects(*fd, *playerPixie) {
-			if g.fairyDustLeft%10 == 0 {
+			if g.fairyDustCollected%4 == 0 {
 				playerPixie.grow()
 				playerPixie.color = fd.color
 			}
