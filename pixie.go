@@ -19,7 +19,8 @@ const (
 	pixieMovementLength   = 5
 	pixieStartingSize     = 4
 	fairyDustSize         = 4
-	fairyDustOnScreen     = 10
+	maxFairyDustOnScreen  = 100
+	fairyDustBatches      = 10
 	fairyDustSpawnCadence = 5 * time.Second
 )
 
@@ -33,17 +34,19 @@ type sprite struct {
 
 type game struct {
 	ticks int64
+	level int
 
 	lastFairyDustSpawnTime time.Time
-	gameStartTime          time.Time
-	gameDuration           time.Duration
+	levelStartTime         time.Time
+	levelDuration          time.Duration
 
 	sx, sy int
 	player *sprite
 
-	fairyDust          [fairyDustOnScreen]*sprite
+	fairyDust          [maxFairyDustOnScreen]*sprite
 	fairyDustLeft      int
 	fairyDustCollected int
+	fairyDustAmount    int
 }
 
 func keyBeingPressed(key ebiten.Key) bool {
@@ -101,22 +104,33 @@ func (p *sprite) drawTo(i *ebiten.Image) {
 	}
 }
 
-func (g *game) init() {
+func (g *game) init(level int) {
+	fairyDustCoefficient := level
+	if level <= 0 {
+		fairyDustCoefficient = 1
+	} else if level > 10 {
+		fairyDustCoefficient = 10
+	}
+	g.fairyDustAmount = fairyDustCoefficient * fairyDustBatches
+	g.level = level
 	g.sx, g.sy = ebiten.ScreenSizeInFullscreen()
-	g.fairyDustLeft = fairyDustOnScreen
+	g.fairyDustLeft = g.fairyDustAmount
 	g.player = g.newPixie(g.sx/20, g.sy/20)
-	for i := 0; i < fairyDustOnScreen; i++ {
+	for i := 0; i < g.fairyDustAmount; i++ {
 		g.fairyDust[i] = g.newFairyDust(-1, -1)
 	}
 	now := time.Now()
 	g.lastFairyDustSpawnTime = now
-	g.gameStartTime = now
+	g.levelStartTime = now
 }
 
 func (g *game) Update(screen *ebiten.Image) (err error) {
 	defer func() {
 		if inpututil.IsKeyJustPressed(ebiten.KeyQ) || inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 			os.Exit(0)
+		} else if g.fairyDustLeft == 0 && inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+			g.level++
+			g.init(g.level)
 		}
 		err = g.Draw(screen)
 	}()
@@ -129,7 +143,7 @@ func (g *game) Update(screen *ebiten.Image) (err error) {
 		g.ticks = 0
 	}
 	now := time.Now()
-	g.gameDuration = now.Sub(g.gameStartTime)
+	g.levelDuration = now.Sub(g.levelStartTime)
 
 	playerPixie := g.player
 	if keyBeingPressed(ebiten.KeyRight) && playerPixie.x+playerPixie.size <= g.sx {
@@ -145,7 +159,7 @@ func (g *game) Update(screen *ebiten.Image) (err error) {
 		playerPixie.y = int(math.Min(float64(playerPixie.y+pixieMovementLength), float64(g.sy-playerPixie.size)))
 	}
 
-	for i := 0; i < fairyDustOnScreen; i++ {
+	for i := 0; i < g.fairyDustAmount; i++ {
 		fd := g.fairyDust[i]
 		if fd.active && intersects(*fd, *playerPixie) {
 			if g.fairyDustCollected%4 == 0 {
@@ -160,7 +174,7 @@ func (g *game) Update(screen *ebiten.Image) (err error) {
 
 	if g.ticks%100 == 0 {
 		if now.Add(-fairyDustSpawnCadence).After(g.lastFairyDustSpawnTime) {
-			for i := 0; i < fairyDustOnScreen; i++ {
+			for i := 0; i < g.fairyDustAmount; i++ {
 				if !g.fairyDust[i].active {
 					g.fairyDust[i] = g.newFairyDust(-1, -1)
 					g.fairyDustLeft++
@@ -179,24 +193,25 @@ func (g *game) Draw(screen *ebiten.Image) error {
 	}
 	if g.fairyDustLeft != 0 {
 		g.player.drawTo(screen)
-		for _, v := range g.fairyDust {
-			v.drawTo(screen)
+		for i := 0; i < g.fairyDustAmount; i++ {
+			g.fairyDust[i].drawTo(screen)
 		}
 	}
 	text.Draw(screen, "pixie", basicfont.Face7x13, g.sx/2, 15, colorful.FastHappyColor())
 	text.Draw(screen, fmt.Sprintf("fairy dust left: %d", g.fairyDustLeft), basicfont.Face7x13, 10, 15, colorful.FastHappyColor())
 	text.Draw(screen, fmt.Sprintf("fairy dust collected: %d", g.fairyDustCollected), basicfont.Face7x13, 10, 30, colorful.FastHappyColor())
-	hours := int(g.gameDuration.Hours())
-	minutes := int(g.gameDuration.Minutes())
-	secs := int(g.gameDuration.Seconds())
-	text.Draw(screen, fmt.Sprintf("%02d:%02d:%02d", hours, minutes-(hours*60), secs-(minutes*60)), basicfont.Face7x13, g.sx-100, 15, colorful.FastHappyColor())
+	hours := int(g.levelDuration.Hours())
+	minutes := int(g.levelDuration.Minutes())
+	secs := int(g.levelDuration.Seconds())
+	text.Draw(screen, fmt.Sprintf("level %d", g.level), basicfont.Face7x13, g.sx-100, 15, colorful.FastHappyColor())
+	text.Draw(screen, fmt.Sprintf("%02d:%02d:%02d", hours, minutes-(hours*60), secs-(minutes*60)), basicfont.Face7x13, g.sx-100, 30, colorful.FastHappyColor())
 	if g.fairyDustLeft == 0 {
 		text.Draw(screen, "complete!", basicfont.Face7x13, g.sx/2, g.sy/2, colorful.FastHappyColor())
 	}
 	return nil
 }
 
-func (g *game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
+func (g *game) Layout(_, _ int) (int, int) {
 	return g.sx, g.sy
 }
 
@@ -206,7 +221,7 @@ func main() {
 	ebiten.SetWindowTitle("pixie")
 	ebiten.SetFullscreen(true)
 	ebiten.SetCursorMode(ebiten.CursorModeHidden)
-	game.init()
+	game.init(1)
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatalln(err)
